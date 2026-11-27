@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="belltide_accent">#FF1F6F78</color>
+    <color name="ic_launcher_background">#FF0F3D4A</color>
+    <color name="ic_launcher_bell">#FFF4E9D8</color>
+    <color name="ic_launcher_wave">#FF7FD1C7</color>
+</resources>

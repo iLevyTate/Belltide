@@ -1,0 +1,6 @@
+# Copy to android/key.properties (which git ignores) and fill in your values.
+# storeFile is relative to android/app/.
+storeFile=../belltide-release.jks
+storePassword=change-me
+keyAlias=belltide
+keyPassword=change-me

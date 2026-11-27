@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and older. Saved timers are backed up; these are not:
+     running-timer state is tied to this boot, and the ClickUp token is encrypted
+     with a key that never leaves this phone. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="belltide_engine.xml" />
+    <exclude domain="sharedpref" path="belltide_clickup.xml" />
+</full-backup-content>

@@ -1,0 +1,21 @@
+{
+  "timers": [
+    {
+      "id": "stretch-holds",
+      "name": "Stretch holds",
+      "kind": "sequence",
+      "status": "running",
+      "inLeadIn": false,
+      "stepIndex": 1,
+      "stepCount": 2,
+      "stepLabel": "Rest",
+      "round": 1,
+      "rounds": 10,
+      "stepDurationMs": 30000,
+      "stepRemainingMs": 28000,
+      "totalRemainingMs": 388000,
+      "activeMs": 17000
+    }
+  ],
+  "finished": []
+}
