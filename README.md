@@ -8,7 +8,7 @@ Belltide is a native Flutter app for anything that runs on a rhythm: recurring c
 
 Early development. Android first.
 
-The v1 feature set is implemented and covered by unit and widget tests, and the app builds as a debug and release APK. It has not yet been tested on physical devices with the screen off; that is roadmap step 3, and [docs/reliability-testing.md](docs/reliability-testing.md) describes how to run it.
+The v1 feature set and the optional ClickUp integration are implemented and covered by unit and widget tests, and the app builds as a debug and release APK. It has not yet been tested on physical devices with the screen off, and the ClickUp integration has only been tested against a simulated API; that is roadmap step 3, and [docs/reliability-testing.md](docs/reliability-testing.md) describes how to run it.
 
 ## Features
 
@@ -22,9 +22,31 @@ The v1 feature set is implemented and covered by unit and widget tests, and the 
 
 The app opens with three sample timers (a five-minute mindfulness bell, stretch holds, and a 50/10 work and rest cycle). Edit or delete them freely.
 
-### Later
+### ClickUp integration (optional)
 
-- ClickUp integration (optional): search tasks and subtasks, attach a timer to one, and run several timers for different tasks at once while each stays in sync with its task.
+Search tasks and subtasks, attach a timer to one, and run several timers for different tasks at once while each stays in sync with its task.
+
+- **Connect** in Settings › ClickUp with a personal API token (ClickUp › Settings › Apps › API Token). Pick a workspace if you have more than one.
+- **Search** from the task icon on the home screen, or from "Link a task" in the timer editor. Results cover tasks and subtasks, most recently updated first, filtered to tasks assigned to you unless you turn that off. Every word you type must appear in the task name, custom id, list, folder, status, or the parent task's name, so typing a parent finds its subtasks. Pasting a task link or id (including custom ids like `DEV-42`) opens that exact task even if it isn't in the loaded results.
+- **Attach a timer** by linking it in the editor, or by choosing a task in search and starting one of your timers for it. That saves a copy of the timer linked to the task, so each task can have its own timer running at the same time.
+- **Time logging.** Each stretch of running time (start or resume until pause, stop or finish) becomes a ClickUp time entry on the linked task, described as "*timer name* (Belltide)". ClickUp allows only one running timer per user, so Belltide creates finished entries instead of using ClickUp's live timer; that is what lets several tasks be timed at once. Entries are queued on the phone and retried when the connection returns.
+- **Staying in sync.** Linked task names and statuses refresh when the app opens. A task deleted in ClickUp is marked "not found" on its timer.
+
+#### What the ClickUp API allows
+
+Belltide uses ClickUp's public REST API (v2) with your own token. That API has no text search and no access to ClickUp Brain or other AI features, so search runs on the phone over the tasks Belltide loads: 300 at first (in pages of 100), with "Load more" for older ones, plus direct lookup by link or id. ClickUp's own keyword and AI search is only available inside ClickUp and its assistant integrations, not to third-party apps using a personal token.
+
+The requests Belltide makes are:
+
+| Purpose | Request |
+| --- | --- |
+| Check the token, get your user id | `GET /api/v2/user` |
+| List workspaces | `GET /api/v2/team` |
+| Load tasks and subtasks for search | `GET /api/v2/team/{team_id}/task?subtasks=true&order_by=updated&assignees[]=…` |
+| Look up a task, refresh a linked task | `GET /api/v2/task/{task_id}` |
+| Log time | `POST /api/v2/team/{team_id}/time_entries` with `start`, `duration` and `tid` |
+
+The token is encrypted with a key in the Android Keystore and excluded from cloud backups, along with the time-entry queue. Disconnecting deletes the token and any entries not yet sent.
 
 ## How it runs
 
@@ -32,7 +54,7 @@ The app opens with three sample timers (a five-minute mindfulness bell, stretch 
 - Timer engine runs in an Android foreground service; the Flutter UI reads its state
 - Sequences and presets are stored on the device
 - No account and no server; the app works offline
-- ClickUp integration, when added, will be opt-in and talk directly to the ClickUp API with the user's own token
+- ClickUp integration is opt-in and talks directly to the ClickUp API with the user's own token
 
 ### Timing
 
@@ -41,6 +63,8 @@ The engine is written in Kotlin and lives in the foreground service, not in Dart
 1. **Foreground service.** Android keeps the process alive and, because it runs at foreground-service priority, honours its wake lock even in Doze.
 2. **Partial wake lock while a timer runs.** The CPU stays awake for the next chime. When every timer is paused, the lock is released.
 3. **Schedule computed from `SystemClock.elapsedRealtime`.** Each chime's time comes from the timer's start time and its steps, never from "now plus the step length". A late wake-up plays the chime late but does not shift any later chime. If a wake-up is more than five seconds late, that chime is skipped rather than played out of place, and if several boundaries were missed only the most recent one sounds.
+
+For timers linked to a ClickUp task, the service records each stretch of running time when the timer pauses, stops or finishes, converts it to wall-clock time, and queues it for upload on a background thread. Uploads that fail for a network, rate-limit or token problem stay in the queue and are retried when the service starts, when another entry is added, or when the app opens. An entry ClickUp refuses outright (for example because the task was deleted) is dropped and the reason is shown in Settings › ClickUp.
 
 Running timers are saved on every change. If Android kills the service, it restarts it, or the app restores it the next time it opens, and the timers continue on their original schedule. Timers do not survive a reboot.
 
@@ -52,7 +76,7 @@ Chimes play through a `SoundPool` on either the alarm stream (the default, usual
 | --- | --- |
 | Minimum Android version | 8.0 (API 26) |
 | Foreground service type | `specialUse`, with a subtype explaining the interval-timer use |
-| Permissions | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `WAKE_LOCK`, `POST_NOTIFICATIONS`, `VIBRATE` |
+| Permissions | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `WAKE_LOCK`, `POST_NOTIFICATIONS`, `VIBRATE`, `INTERNET` (ClickUp only) |
 | Notification permission | Requested the first time a timer starts (Android 13+). Timers still ring without it; only the notification controls are hidden. |
 | Battery optimization | Not requested. Settings links to the system page for phones that stop foreground services anyway. |
 
@@ -85,6 +109,22 @@ cd android && ./gradlew :app:testDebugUnitTest :app:lintDebug
 
 The JSON exchanged between Dart and Kotlin is pinned by fixtures in `test/fixtures/`, which both test suites read. Change them together.
 
+### Releasing
+
+Release builds are signed with the debug key until you add your own. Create a keystore once and keep it safe; Google Play needs the same key for every update:
+
+```bash
+keytool -genkeypair -v -keystore android/belltide-release.jks -storetype PKCS12 -keyalg RSA -keysize 2048 -validity 10000 -alias belltide
+```
+
+Copy `android/key.properties.example` to `android/key.properties` and fill in the passwords. Both files are ignored by git. Then build:
+
+```bash
+flutter build appbundle
+```
+
+Use `flutter build apk --release` for a file you can install directly. Bump `version` in `pubspec.yaml` and `appVersion` in `lib/src/app_info.dart` together.
+
 ### Chime sounds
 
 The sounds are synthesized by `tool/generate_chimes.py` (additive synthesis, no third-party audio) and committed as Ogg files in `android/app/src/main/res/raw/`. To change one, edit the script and regenerate:
@@ -100,8 +140,9 @@ It needs `numpy`, and `ffmpeg` for Ogg output. Sound ids must stay in sync betwe
 ```
 lib/
   main.dart                     App entry point
-  src/model/                    Presets, steps, sounds, running-timer snapshots, settings
+  src/model/                    Presets, steps, sounds, task links, running-timer snapshots, settings
   src/engine/                   Dart interface to the timer service (method and event channels)
+  src/clickup/                  ClickUp API client, on-device task search, connection state
   src/data/                     On-device storage (shared_preferences) and sample timers
   src/state/                    BelltideController: presets, running state, settings
   src/ui/                       Home, editor, settings, pickers
@@ -109,6 +150,7 @@ android/app/src/main/kotlin/io/github/ilevytate/belltide/
   MainActivity.kt               Platform channels, permission requests
   engine/                       Pure timing logic (Timeline, TimerEngine) and JSON
   service/                      TimerService, notification, SoundPool player, persistence
+  clickup/                      Encrypted token, time-entry queue and uploader
 android/app/src/test/           JVM unit tests for the engine
 test/                           Dart unit and widget tests, shared fixtures
 tool/generate_chimes.py         Chime synthesis
@@ -121,7 +163,7 @@ docs/reliability-testing.md     Screen-off test plan for real devices
 2. ~~Multi-step sequences with rounds~~
 3. Foreground service and lock-screen reliability testing (service built; device testing to do)
 4. ~~Saved presets and per-step sounds~~
-5. ClickUp task search and timer linking
+5. ~~ClickUp task search and timer linking~~ (built and tested against a simulated API; needs a check with a real account)
 
 ## License
 

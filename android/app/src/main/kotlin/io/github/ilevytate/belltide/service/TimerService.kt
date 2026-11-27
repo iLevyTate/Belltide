@@ -13,6 +13,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import io.github.ilevytate.belltide.clickup.ClickUpSync
 import io.github.ilevytate.belltide.engine.EngineEffect
 import io.github.ilevytate.belltide.engine.EngineJson
 import io.github.ilevytate.belltide.engine.TimerEngine
@@ -53,8 +54,10 @@ class TimerService : Service() {
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Belltide:timers")
             .apply { setReferenceCounted(false) }
         // Timers recovered from an earlier run continue silently from where they are now.
-        engine.restore(store.loadTimers(), now())
+        logSegments(engine.restore(store.loadTimers(), now()))
         EngineHub.snapshotProvider = { EngineJson.snapshotsToJson(engine.snapshots(now())) }
+        // Retry time entries that couldn't be sent earlier.
+        ClickUpSync.get(this).flush()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -74,13 +77,13 @@ class TimerService : Service() {
                     .onSuccess { effects += engine.start(it, now) }
                     .onFailure { Log.w(TAG, "Ignoring invalid timer config", it) }
             }
-            ACTION_PAUSE -> id?.let { engine.pause(it, now) }
-            ACTION_RESUME -> id?.let { engine.resume(it, now) }
+            ACTION_PAUSE -> id?.let { effects += engine.pause(it, now) }
+            ACTION_RESUME -> id?.let { effects += engine.resume(it, now) }
             ACTION_SKIP -> id?.let { effects += engine.skip(it, now) }
-            ACTION_STOP -> id?.let { engine.stop(it) }
-            ACTION_PAUSE_ALL -> engine.pauseAll(now)
-            ACTION_RESUME_ALL -> engine.resumeAll(now)
-            ACTION_STOP_ALL -> engine.stopAll()
+            ACTION_STOP -> id?.let { effects += engine.stop(it, now) }
+            ACTION_PAUSE_ALL -> effects += engine.pauseAll(now)
+            ACTION_RESUME_ALL -> effects += engine.resumeAll(now)
+            ACTION_STOP_ALL -> effects += engine.stopAll(now)
             else -> Unit // ACTION_RESTORE or a sticky restart: state was loaded in onCreate.
         }
         sync(effects, persist = true)
@@ -109,6 +112,18 @@ class TimerService : Service() {
         sync(effects, persist = effects.any { it is EngineEffect.Finished })
     }
 
+    /** Queues finished stretches of running time for timers linked to a ClickUp task. */
+    private fun logSegments(effects: List<EngineEffect>) {
+        val segments = effects.filterIsInstance<EngineEffect.SegmentEnded>()
+        if (segments.isEmpty()) return
+        val clickUp = ClickUpSync.get(this)
+        // Engine times are elapsedRealtime; ClickUp wants wall-clock milliseconds.
+        val wallOffset = System.currentTimeMillis() - now()
+        segments.forEach { s ->
+            clickUp.recordSegment(s.config, s.startMs + wallOffset, s.endMs - s.startMs)
+        }
+    }
+
     /** Plays chimes, then pushes the new state to storage, the UI and the notification. */
     private fun sync(effects: List<EngineEffect>, persist: Boolean) {
         val player = ChimePlayer.get(this)
@@ -116,8 +131,9 @@ class TimerService : Service() {
             .map { it.sound }
             .distinct()
             .forEach(player::playChime)
+        logSegments(effects)
 
-        if (persist) store.saveTimers(engine.all)
+        if (persist || effects.any { it is EngineEffect.SegmentEnded }) store.saveTimers(engine.all)
         val now = now()
         val snapshots = engine.snapshots(now)
         val finished = effects.filterIsInstance<EngineEffect.Finished>().map { it.timerId }

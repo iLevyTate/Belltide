@@ -3,6 +3,8 @@ import 'package:material_ui/material_ui.dart';
 import '../app_info.dart';
 import '../model/app_settings.dart';
 import '../state/belltide_scope.dart';
+import '../state/clickup_scope.dart';
+import 'clickup/clickup_settings_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -132,6 +134,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onPressed: () => controller.engine.openBatterySettings(),
                     child: const Text('Open'),
                   ),
+          ),
+          const _Header('Integrations'),
+          Builder(
+            builder: (context) {
+              final clickUp = ClickUpScope.of(context);
+              final account = clickUp.account;
+              return ListTile(
+                leading: const Icon(Icons.task_alt_rounded),
+                title: const Text('ClickUp'),
+                subtitle: Text(
+                  clickUp.connected && account != null
+                      ? 'Connected to ${account.workspaceName}'
+                      : 'Optional. Link timers to tasks and log the time they run.',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => openClickUpSettings(context),
+              );
+            },
           ),
           const _Header('About'),
           ListTile(

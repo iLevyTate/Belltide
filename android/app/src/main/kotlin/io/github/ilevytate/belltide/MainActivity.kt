@@ -8,11 +8,13 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.core.net.toUri
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.github.ilevytate.belltide.clickup.ClickUpSync
 import io.github.ilevytate.belltide.service.ChimePlayer
 import io.github.ilevytate.belltide.service.EngineHub
 import io.github.ilevytate.belltide.service.EngineSettings
@@ -103,6 +105,30 @@ class MainActivity : FlutterActivity() {
                 "openBatterySettings" -> {
                     openBatterySettings()
                     result.success(null)
+                }
+                "openUrl" -> {
+                    val uri = call.requireArg<String>("url").toUri()
+                    if (uri.scheme != "https") throw IllegalArgumentException("Only https links open")
+                    startActivity(Intent(Intent.ACTION_VIEW, uri))
+                    result.success(null)
+                }
+                "clickupGetToken" -> result.success(ClickUpSync.get(this).token)
+                "clickupSetToken" -> {
+                    ClickUpSync.get(this).token = call.argument<String>("token")
+                    result.success(null)
+                }
+                "clickupSetLogging" -> {
+                    ClickUpSync.get(this).loggingEnabled = call.argument<Boolean>("enabled") ?: true
+                    result.success(null)
+                }
+                "clickupClearQueue" -> {
+                    ClickUpSync.get(this).clearQueue()
+                    result.success(null)
+                }
+                "clickupSyncStatus" -> result.success(ClickUpSync.get(this).status())
+                "clickupSyncNow" -> {
+                    val sync = ClickUpSync.get(this)
+                    sync.flush { result.success(sync.status()) }
                 }
                 else -> result.notImplemented()
             }

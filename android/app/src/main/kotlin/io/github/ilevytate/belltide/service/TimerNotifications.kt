@@ -59,6 +59,7 @@ class TimerNotifications(private val context: Context) {
 
     private fun single(builder: NotificationCompat.Builder, s: TimerSnapshot) {
         builder.setContentTitle(s.name.ifBlank { context.getString(R.string.app_name) })
+        s.taskName?.let { builder.setSubText(it) }
         if (s.paused) {
             builder.setContentText(
                 context.getString(R.string.notif_paused_detail, stepText(s), clock(s.stepRemainingMs)),

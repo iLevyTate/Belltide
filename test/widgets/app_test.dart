@@ -6,11 +6,11 @@ import 'package:material_ui/material_ui.dart';
 
 import '../support/fakes.dart';
 
-Future<Harness> pumpApp(WidgetTester tester, {Harness? harness}) async {
+Future<Harness> pumpApp(WidgetTester tester, {Harness? harness, bool connectClickUp = false}) async {
   final h = harness ?? Harness();
   h.engine.notificationsGranted = true;
-  await h.controller.load();
-  await tester.pumpWidget(BelltideApp(controller: h.controller));
+  await h.load(connectClickUp: connectClickUp);
+  await tester.pumpWidget(BelltideApp(controller: h.controller, clickUp: h.clickUp));
   await tester.pump();
   return h;
 }
@@ -211,10 +211,10 @@ void main() {
 
   testWidgets('settings offer to turn notifications on when they are off', (tester) async {
     final h = Harness();
-    await h.controller.load();
+    await h.load();
     h.engine.notificationsGranted = false;
     h.engine.grantOnRequest = false;
-    await tester.pumpWidget(BelltideApp(controller: h.controller));
+    await tester.pumpWidget(BelltideApp(controller: h.controller, clickUp: h.clickUp));
     await tester.tap(find.byTooltip('Settings'));
     await settle(tester);
 

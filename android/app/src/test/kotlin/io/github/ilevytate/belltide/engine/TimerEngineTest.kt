@@ -75,13 +75,13 @@ class TimerEngineTest {
     fun pauseFreezesAndResumeShiftsSchedule() {
         val engine = TimerEngine()
         engine.start(holdRest(rounds = 1), t0)
-        assertTrue(engine.pause("stretch", t0 + 4_000))
+        assertTrue(engine.pause("stretch", t0 + 4_000).isNotEmpty())
         assertNull(engine.nextWakeAt())
         assertFalse(engine.hasActive)
         // Remaining time does not change while paused.
         assertEquals(6_000, engine.snapshots(t0 + 60_000).single().stepRemainingMs)
 
-        assertTrue(engine.resume("stretch", t0 + 64_000))
+        assertTrue(engine.resume("stretch", t0 + 64_000).isNotEmpty())
         assertEquals(t0 + 70_000, engine.nextWakeAt())
         assertEquals(listOf("wood"), engine.tick(t0 + 70_000).sounds())
     }
@@ -190,9 +190,9 @@ class TimerEngineTest {
     fun stopRemovesTimer() {
         val engine = TimerEngine()
         engine.start(holdRest(), t0)
-        assertTrue(engine.stop("stretch"))
+        assertTrue(engine.stop("stretch", t0).isNotEmpty())
         assertTrue(engine.isEmpty)
-        assertFalse(engine.stop("stretch"))
+        assertTrue(engine.stop("stretch", t0).isEmpty())
     }
 
     @Test
@@ -246,5 +246,71 @@ class TimerEngineTest {
         val engine = TimerEngine()
         engine.start(interval(), t0)
         assertEquals(-1, engine.snapshots(t0 + 1).single().totalRemainingMs)
+    }
+
+    private fun List<EngineEffect>.segments() =
+        filterIsInstance<EngineEffect.SegmentEnded>().map { (it.startMs - t0) to (it.endMs - t0) }
+
+    @Test
+    fun pauseAndStopReportRunningSegments() {
+        val engine = TimerEngine()
+        engine.start(holdRest(rounds = 0), t0)
+        assertEquals(listOf(0L to 4_000L), engine.pause("stretch", t0 + 4_000).segments())
+        // A paused timer has no open segment to close.
+        assertTrue(engine.pause("stretch", t0 + 5_000).isEmpty())
+        engine.resume("stretch", t0 + 60_000)
+        assertEquals(listOf(60_000L to 75_000L), engine.stop("stretch", t0 + 75_000).segments())
+    }
+
+    @Test
+    fun skippingKeepsTheSegmentOpen() {
+        val engine = TimerEngine()
+        engine.start(holdRest(rounds = 0), t0)
+        assertTrue(engine.skip("stretch", t0 + 2_000).segments().isEmpty())
+        assertEquals(listOf(0L to 9_000L), engine.stop("stretch", t0 + 9_000).segments())
+    }
+
+    @Test
+    fun finishLogsUpToTheScheduledEnd() {
+        val engine = TimerEngine()
+        engine.start(holdRest(rounds = 1), t0)
+        // The wake-up came 300 ms late; the segment still ends at 40 s.
+        val effects = engine.tick(t0 + 40_300)
+        assertEquals(listOf(0L to 40_000L), effects.segments())
+        assertEquals(listOf("stretch"), effects.finished())
+    }
+
+    @Test
+    fun restartingARunningTimerClosesItsSegment() {
+        val engine = TimerEngine()
+        engine.start(holdRest(), t0)
+        assertEquals(listOf(0L to 7_000L), engine.start(holdRest(), t0 + 7_000).segments())
+    }
+
+    @Test
+    fun stopAllAndPauseAllCloseEverySegment() {
+        val engine = TimerEngine()
+        engine.start(interval(id = "a"), t0)
+        engine.start(holdRest(id = "b"), t0 + 1_000)
+        assertEquals(2, engine.pauseAll(t0 + 5_000).segments().size)
+        engine.resumeAll(t0 + 6_000)
+        assertEquals(listOf(6_000L to 8_000L, 6_000L to 8_000L), engine.stopAll(t0 + 8_000).segments())
+        assertTrue(engine.isEmpty)
+    }
+
+    @Test
+    fun restoredTimerThatFinishedMeanwhileLogsItsTime() {
+        val engine = TimerEngine()
+        val restored = RunningTimer(holdRest(rounds = 1), anchorMs = t0, segmentStartMs = t0)
+        val effects = engine.restore(listOf(restored), t0 + 600_000)
+        assertEquals(listOf(0L to 40_000L), effects.segments())
+    }
+
+    @Test
+    fun restoredRunningTimerKeepsItsSegment() {
+        val engine = TimerEngine()
+        val restored = RunningTimer(holdRest(rounds = 0), anchorMs = t0, segmentStartMs = t0)
+        engine.restore(listOf(restored), t0 + 30_000)
+        assertEquals(listOf(0L to 50_000L), engine.stop("stretch", t0 + 50_000).segments())
     }
 }

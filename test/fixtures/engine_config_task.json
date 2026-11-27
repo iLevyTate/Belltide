@@ -1,0 +1,14 @@
+{
+  "id": "knee-rehab",
+  "name": "Knee rehab",
+  "kind": "sequence",
+  "steps": [
+    {"label": "Hold", "durationMs": 10000, "sound": "bell"},
+    {"label": "Rest", "durationMs": 30000, "sound": "wood"}
+  ],
+  "rounds": 10,
+  "leadInMs": 5000,
+  "startChime": true,
+  "finishSound": "rise",
+  "task": {"id": "86b1x2y3z", "teamId": "9001", "name": "Knee rehab"}
+}

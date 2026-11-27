@@ -8,6 +8,7 @@ import '../engine/timer_engine.dart';
 import '../model/app_settings.dart';
 import '../model/chime_sound.dart';
 import '../model/running_timer.dart';
+import '../model/task_link.dart';
 import '../model/timer_preset.dart';
 import '../util/clock.dart';
 import '../util/ids.dart';
@@ -212,6 +213,49 @@ class BelltideController extends ChangeNotifier {
     notifyListeners();
     await _presetRepo.save(_presets);
     return copy;
+  }
+
+  /// Saves a copy of [template] linked to [task], placed after the template.
+  Future<TimerPreset> createLinkedCopy(TimerPreset template, TaskLink task) async {
+    final copy = template.copyWith(
+      id: _newId(),
+      steps: [
+        for (final s in template.steps)
+          TimerStep(id: _newId(), label: s.label, duration: s.duration, sound: s.sound),
+      ],
+      task: task,
+    );
+    final index = _presets.indexWhere((p) => p.id == template.id);
+    _presets = [..._presets]..insert(index < 0 ? _presets.length : index + 1, copy);
+    notifyListeners();
+    await _presetRepo.save(_presets);
+    return copy;
+  }
+
+  /// Timers linked to the ClickUp task with [taskId].
+  List<TimerPreset> presetsForTask(String taskId) =>
+      _presets.where((p) => p.task?.taskId == taskId).toList();
+
+  /// Keeps linked task names and links current after ClickUp reports changes.
+  Future<void> applyTaskUpdates(Map<String, TaskLink> latest) async {
+    var changed = false;
+    final next = [
+      for (final p in _presets)
+        if (p.task case final link? when latest.containsKey(link.taskId))
+          () {
+            final fresh = latest[link.taskId]!;
+            final updated = link.copyWith(name: fresh.name, url: fresh.url, customId: fresh.customId);
+            if (updated == link) return p;
+            changed = true;
+            return p.copyWith(task: updated);
+          }()
+        else
+          p,
+    ];
+    if (!changed) return;
+    _presets = next;
+    notifyListeners();
+    await _presetRepo.save(_presets);
   }
 
   Future<void> updateSettings(AppSettings settings) async {

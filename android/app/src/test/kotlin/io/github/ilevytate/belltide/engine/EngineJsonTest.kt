@@ -81,6 +81,18 @@ class EngineJsonTest {
         assertTrue(c.startChime)
     }
 
+    @Test
+    fun parsesTheSharedTaskLinkFixture() {
+        val config = EngineJson.parseConfig(fixture("engine_config_task.json"))
+        assertEquals(TaskLink(taskId = "86b1x2y3z", teamId = "9001", name = "Knee rehab"), config.task)
+        assertEquals(config, EngineJson.parseConfig(EngineJson.configToJson(config).toString()))
+    }
+
+    @Test
+    fun configWithoutTaskHasNoLink() {
+        assertNull(EngineJson.parseConfig(fixture("engine_config.json")).task)
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun rejectsEmptySteps() {
         EngineJson.parseConfig("""{"id":"x","steps":[]}""")
@@ -90,13 +102,15 @@ class EngineJsonTest {
     fun runningTimersRoundTrip() {
         val timers = listOf(
             RunningTimer(holdRest(), anchorMs = 123, pausedAtMs = 456),
-            RunningTimer(interval(), anchorMs = 789),
+            RunningTimer(interval(), anchorMs = 789, segmentStartMs = 790),
         )
         val parsed = EngineJson.parseRunning(EngineJson.runningToJson(timers))
         assertEquals(2, parsed.size)
         assertEquals(456L, parsed[0].pausedAtMs)
         assertNull(parsed[1].pausedAtMs)
         assertEquals(789, parsed[1].anchorMs)
+        assertEquals(790L, parsed[1].segmentStartMs)
+        assertNull(parsed[0].segmentStartMs)
         assertEquals(interval(), parsed[1].config)
     }
 

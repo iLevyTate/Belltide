@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:belltide/src/model/app_settings.dart';
 import 'package:belltide/src/model/chime_sound.dart';
 import 'package:belltide/src/model/running_timer.dart';
+import 'package:belltide/src/model/task_link.dart';
 import 'package:belltide/src/model/timer_preset.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -53,6 +54,33 @@ void main() {
     test('engine JSON matches the shared wire-format fixture', () {
       final fixture = jsonDecode(File('test/fixtures/engine_config.json').readAsStringSync());
       expect(jsonDecode(jsonEncode(stretchHolds().toEngineJson())), fixture);
+    });
+
+    test('a linked task is sent to the engine as in the shared fixture', () {
+      final linked = stretchHolds().copyWith(
+        id: 'knee-rehab',
+        name: 'Knee rehab',
+        task: const TaskLink(
+          taskId: '86b1x2y3z',
+          teamId: '9001',
+          name: 'Knee rehab',
+          url: 'https://app.clickup.com/t/86b1x2y3z',
+        ),
+      );
+      final fixture = jsonDecode(File('test/fixtures/engine_config_task.json').readAsStringSync());
+      expect(jsonDecode(jsonEncode(linked.toEngineJson())), fixture);
+    });
+
+    test('task links round-trip and can be cleared', () {
+      final linked = stretchHolds().copyWith(
+        task: const TaskLink(taskId: 't1', teamId: '9', name: 'Task', customId: 'DEV-1'),
+      );
+      final decoded = TimerPreset.fromJson(jsonDecode(jsonEncode(linked.toJson())) as Map<String, Object?>);
+      expect(decoded.task, linked.task);
+      expect(decoded, linked);
+      expect(linked.copyWith(clearTask: true).task, isNull);
+      expect(linked.copyWith(name: 'x').task, linked.task);
+      expect(TaskLink.fromJson({'taskId': '', 'teamId': '1'}), isNull);
     });
 
     test('interval engine JSON finishes on its own chime and ignores lead-in', () {

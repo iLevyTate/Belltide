@@ -9,6 +9,8 @@ class RunningTimer(
     var pausedAtMs: Long? = null,
     /** Index of the next boundary whose sound has not been handled yet. */
     var nextBoundary: Long = 0,
+    /** Clock time when the current stretch of running time began; null while paused. */
+    var segmentStartMs: Long? = null,
 ) {
     val timeline = Timeline(config)
     val paused: Boolean get() = pausedAtMs != null
@@ -26,6 +28,17 @@ sealed interface EngineEffect {
 
     /** A finite timer ran all its rounds and was removed. */
     data class Finished(override val timerId: String, val name: String) : EngineEffect
+
+    /**
+     * A stretch of running time ended (pause, stop, finish or restart). Times are on
+     * the engine clock. Used to log time to a linked ClickUp task.
+     */
+    data class SegmentEnded(
+        override val timerId: String,
+        val config: TimerConfig,
+        val startMs: Long,
+        val endMs: Long,
+    ) : EngineEffect
 }
 
 /** What the UI and the notification show for one timer. */
@@ -47,6 +60,8 @@ data class TimerSnapshot(
     /** -1 when the timer repeats until stopped. */
     val totalRemainingMs: Long,
     val activeMs: Long,
+    /** Name of the linked ClickUp task, if any. */
+    val taskName: String? = null,
 )
 
 /**
@@ -72,9 +87,18 @@ class TimerEngine(
 
     /** Starts [config], replacing any running instance with the same id. */
     fun start(config: TimerConfig, now: Long): List<EngineEffect> {
-        timers.remove(config.id)
-        timers[config.id] = RunningTimer(config, anchorMs = now)
-        return tick(now) + EngineEffect.Advanced(config.id)
+        val previous = timers.remove(config.id)
+        val ended = previous?.let { endSegment(it, now) } ?: emptyList()
+        timers[config.id] = RunningTimer(config, anchorMs = now, segmentStartMs = now)
+        return ended + tick(now) + EngineEffect.Advanced(config.id)
+    }
+
+    /** Closes the timer's current stretch of running time, if it has one. */
+    private fun endSegment(timer: RunningTimer, endMs: Long): List<EngineEffect> {
+        val start = timer.segmentStartMs ?: return emptyList()
+        timer.segmentStartMs = null
+        if (endMs <= start) return emptyList()
+        return listOf(EngineEffect.SegmentEnded(timer.config.id, timer.config, start, endMs))
     }
 
     /** Adds timers recovered after a restart without replaying chimes they missed. */
@@ -84,41 +108,45 @@ class TimerEngine(
             val k = timer.timeline.lastBoundaryAt(timer.activeMs(now))
             val finish = timer.timeline.finishBoundary
             if (finish != null && k >= finish) {
+                val end = (timer.anchorMs + timer.timeline.boundaryTime(finish)).coerceAtMost(now)
+                effects += endSegment(timer, end)
                 effects += EngineEffect.Finished(timer.config.id, timer.config.name)
                 continue
             }
+            // Older saved state had no segment; count from now so no time is lost.
+            if (!timer.paused && timer.segmentStartMs == null) timer.segmentStartMs = now
             timer.nextBoundary = k + 1
             timers[timer.config.id] = timer
         }
         return effects
     }
 
-    fun pause(id: String, now: Long): Boolean {
-        val timer = timers[id] ?: return false
-        if (timer.paused) return false
+    fun pause(id: String, now: Long): List<EngineEffect> {
+        val timer = timers[id] ?: return emptyList()
+        if (timer.paused) return emptyList()
         timer.pausedAtMs = now
-        return true
+        return endSegment(timer, now) + EngineEffect.Advanced(id)
     }
 
-    fun resume(id: String, now: Long): Boolean {
-        val timer = timers[id] ?: return false
-        val pausedAt = timer.pausedAtMs ?: return false
+    fun resume(id: String, now: Long): List<EngineEffect> {
+        val timer = timers[id] ?: return emptyList()
+        val pausedAt = timer.pausedAtMs ?: return emptyList()
         timer.anchorMs += now - pausedAt
         timer.pausedAtMs = null
-        return true
+        timer.segmentStartMs = now
+        return listOf(EngineEffect.Advanced(id))
     }
 
-    fun pauseAll(now: Long): Boolean = timers.keys.toList().map { pause(it, now) }.any { it }
+    fun pauseAll(now: Long): List<EngineEffect> = timers.keys.toList().flatMap { pause(it, now) }
 
-    fun resumeAll(now: Long): Boolean = timers.keys.toList().map { resume(it, now) }.any { it }
+    fun resumeAll(now: Long): List<EngineEffect> = timers.keys.toList().flatMap { resume(it, now) }
 
-    fun stop(id: String): Boolean = timers.remove(id) != null
-
-    fun stopAll(): Boolean {
-        val had = timers.isNotEmpty()
-        timers.clear()
-        return had
+    fun stop(id: String, now: Long): List<EngineEffect> {
+        val timer = timers.remove(id) ?: return emptyList()
+        return endSegment(timer, now) + EngineEffect.Advanced(id)
     }
+
+    fun stopAll(now: Long): List<EngineEffect> = timers.keys.toList().flatMap { stop(it, now) }
 
     /** Jumps to the start of the next step. While paused the jump is silent. */
     fun skip(id: String, now: Long): List<EngineEffect> {
@@ -131,7 +159,7 @@ class TimerEngine(
         val finish = timer.timeline.finishBoundary
         if (finish != null && target >= finish) {
             timers.remove(id)
-            return listOf(EngineEffect.Finished(id, timer.config.name))
+            return endSegment(timer, now) + EngineEffect.Finished(id, timer.config.name)
         }
         timer.nextBoundary = target + 1
         return listOf(EngineEffect.Advanced(id))
@@ -159,6 +187,9 @@ class TimerEngine(
             val finish = timer.timeline.finishBoundary
             if (finish != null && k >= finish) {
                 iterator.remove()
+                // Log up to the scheduled end, not a late wake-up.
+                val end = (timer.anchorMs + timer.timeline.boundaryTime(finish)).coerceAtMost(now)
+                effects += endSegment(timer, end)
                 effects += EngineEffect.Finished(id, timer.config.name)
             }
         }
@@ -193,6 +224,7 @@ class TimerEngine(
             stepRemainingMs = (pos.endMs - active).coerceAtLeast(0),
             totalRemainingMs = total?.let { (it - active).coerceAtLeast(0) } ?: -1,
             activeMs = active,
+            taskName = config.task?.name,
         )
     }
 }

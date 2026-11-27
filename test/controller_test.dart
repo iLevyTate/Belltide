@@ -4,6 +4,7 @@ import 'package:belltide/src/data/repositories.dart';
 import 'package:belltide/src/model/app_settings.dart';
 import 'package:belltide/src/model/chime_sound.dart';
 import 'package:belltide/src/model/running_timer.dart';
+import 'package:belltide/src/model/task_link.dart';
 import 'package:belltide/src/model/timer_preset.dart';
 import 'package:belltide/src/state/belltide_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -169,5 +170,35 @@ void main() {
     expect(sequence.validate(), isNull);
     expect(interval.id, isNot(sequence.id));
     expect(sequence.steps, hasLength(2));
+  });
+
+  test('a linked copy keeps the pattern, gets fresh ids, and sits after its template', () async {
+    final h = Harness();
+    await h.controller.load();
+    final template = h.controller.presets[1];
+    const link = TaskLink(taskId: 't1', teamId: '9001', name: 'Knee rehab');
+    final copy = await h.controller.createLinkedCopy(template, link);
+    expect(h.controller.presets[2].id, copy.id);
+    expect(copy.task, link);
+    expect(copy.name, template.name);
+    expect(copy.cycle, template.cycle);
+    expect(copy.steps.first.id, isNot(template.steps.first.id));
+    expect(h.controller.presetsForTask('t1').single.id, copy.id);
+    expect(template.task, isNull);
+  });
+
+  test('task renames from ClickUp update linked timers', () async {
+    final h = Harness();
+    await h.controller.load();
+    const link = TaskLink(taskId: 't1', teamId: '9001', name: 'Old');
+    await h.controller.createLinkedCopy(h.controller.presets.first, link);
+    await h.controller.applyTaskUpdates({
+      't1': const TaskLink(taskId: 't1', teamId: '9001', name: 'New', url: 'https://app.clickup.com/t/t1'),
+    });
+    final updated = h.controller.presetsForTask('t1').single.task!;
+    expect(updated.name, 'New');
+    expect(updated.url, 'https://app.clickup.com/t/t1');
+    final reloaded = await PresetRepository(h.store).load();
+    expect(reloaded!.firstWhere((p) => p.task != null).task!.name, 'New');
   });
 }

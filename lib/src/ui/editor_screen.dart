@@ -4,6 +4,9 @@ import '../model/chime_sound.dart';
 import '../model/timer_preset.dart';
 import '../state/belltide_controller.dart';
 import '../state/belltide_scope.dart';
+import '../state/clickup_scope.dart';
+import 'clickup/task_picker_screen.dart';
+import 'clickup/task_widgets.dart';
 import '../util/format.dart';
 import 'common.dart';
 import 'duration_picker.dart';
@@ -192,8 +195,58 @@ class _EditorScreenState extends State<EditorScreen> {
             max: TimerPreset.maxRounds,
             onChanged: (v) => _update((p) => p.copyWith(rounds: v)),
           ),
+        ..._clickUpSection(p),
       ],
     );
+  }
+
+  /// Link or unlink a ClickUp task. Shown once ClickUp is connected, or when the
+  /// timer already has a link.
+  List<Widget> _clickUpSection(TimerPreset p) {
+    final clickUp = ClickUpScope.of(context);
+    final link = p.task;
+    if (!clickUp.connected && link == null) return const [];
+    final task = link == null ? null : clickUp.linkedTask(link.taskId);
+    final String subtitle;
+    if (link == null) {
+      subtitle = 'Log this timer\'s running time to a task';
+    } else if (!clickUp.connected) {
+      subtitle = 'ClickUp is disconnected, so no time is logged';
+    } else if (!clickUp.logTime) {
+      subtitle = 'Time logging is off in ClickUp settings';
+    } else {
+      subtitle = 'Time is logged when the timer pauses, stops or finishes';
+    }
+    return [
+      const SectionHeader('ClickUp'),
+      ListTile(
+        leading: Icon(link == null ? Icons.add_task_rounded : Icons.task_alt_rounded),
+        title: Text(link == null ? 'Link a task' : (task?.name ?? link.name)),
+        subtitle: Text(subtitle),
+        trailing: link == null
+            ? null
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (task != null && task.status.isNotEmpty) StatusChip(status: task.status, color: task.statusColor, dense: true),
+                  IconButton(
+                    tooltip: 'Unlink task',
+                    icon: const Icon(Icons.link_off_rounded),
+                    onPressed: () => _update((p) => p.copyWith(clearTask: true)),
+                  ),
+                ],
+              ),
+        onTap: clickUp.connected ? _pickTask : null,
+      ),
+    ];
+  }
+
+  Future<void> _pickTask() async {
+    final task = await pickClickUpTask(context);
+    if (task == null || !mounted) return;
+    _update((p) => p.copyWith(task: task.toLink()));
+    // Name a new, unnamed timer after its task.
+    if (_name.text.trim().isEmpty) _name.text = task.name;
   }
 
   Widget _sequenceBody(TimerPreset p) {
@@ -295,6 +348,7 @@ class _EditorScreenState extends State<EditorScreen> {
                 onPreview: _preview,
                 onChanged: (sound) => _update((p) => p.copyWith(finishSound: sound)),
               ),
+            ..._clickUpSection(p),
             const SizedBox(height: 24),
           ],
         ),

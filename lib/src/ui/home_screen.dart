@@ -4,6 +4,8 @@ import 'package:material_ui/material_ui.dart';
 
 import '../model/timer_preset.dart';
 import '../state/belltide_scope.dart';
+import '../state/clickup_scope.dart';
+import 'clickup/task_picker_screen.dart';
 import 'editor_screen.dart';
 import 'settings_screen.dart';
 import 'timer_card.dart';
@@ -17,6 +19,23 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription<String>? _finished;
+  late final AppLifecycleListener _lifecycle;
+
+  @override
+  void initState() {
+    super.initState();
+    _lifecycle = AppLifecycleListener(onResume: _onResume);
+  }
+
+  /// Brings ClickUp task details and the time-entry queue up to date.
+  Future<void> _onResume() async {
+    final clickUp = ClickUpScope.read(context);
+    if (!clickUp.connected) return;
+    final links = BelltideScope.read(context).presets.map((p) => p.task).nonNulls.toList();
+    await clickUp.refreshSyncStatus();
+    if (clickUp.syncStatus.pending > 0) await clickUp.syncNow();
+    await clickUp.refreshLinked(links);
+  }
 
   @override
   void didChangeDependencies() {
@@ -31,6 +50,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _lifecycle.dispose();
     _finished?.cancel();
     super.dispose();
   }
@@ -38,6 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final controller = BelltideScope.of(context);
+    final clickUp = ClickUpScope.of(context);
     final presets = controller.presets;
 
     final Widget body;
@@ -57,6 +78,12 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('Belltide'),
         actions: [
+          if (clickUp.connected)
+            IconButton(
+              tooltip: 'ClickUp tasks',
+              icon: const Icon(Icons.task_alt_rounded),
+              onPressed: () => browseClickUpTasks(context),
+            ),
           IconButton(
             tooltip: 'Settings',
             icon: const Icon(Icons.settings_outlined),

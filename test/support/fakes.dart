@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:belltide/src/clickup/clickup_controller.dart';
 import 'package:belltide/src/data/key_value_store.dart';
 import 'package:belltide/src/data/repositories.dart';
 import 'package:belltide/src/engine/timer_engine.dart';
@@ -9,6 +10,8 @@ import 'package:belltide/src/model/running_timer.dart';
 import 'package:belltide/src/model/timer_preset.dart';
 import 'package:belltide/src/state/belltide_controller.dart';
 import 'package:belltide/src/util/clock.dart';
+
+import 'clickup_fakes.dart';
 
 /// A clock tests can move by hand.
 class FakeClock implements MonotonicClock {
@@ -93,7 +96,9 @@ class Harness {
   Harness({Map<String, String>? stored})
     : store = MemoryStore(stored),
       engine = FakeEngine(),
-      clock = FakeClock() {
+      clock = FakeClock(),
+      server = FakeClickUpServer(),
+      bridge = FakeClickUpBridge() {
     controller = BelltideController(
       engine: engine,
       presets: PresetRepository(store),
@@ -101,12 +106,23 @@ class Harness {
       clock: clock,
       idGenerator: sequentialIds(),
     );
+    clickUp = ClickUpController(bridge: bridge, store: store, apiFactory: server.api);
   }
 
   final MemoryStore store;
   final FakeEngine engine;
   final FakeClock clock;
+  final FakeClickUpServer server;
+  final FakeClickUpBridge bridge;
   late final BelltideController controller;
+  late final ClickUpController clickUp;
+
+  /// Loads everything, optionally with ClickUp already connected.
+  Future<void> load({bool connectClickUp = false}) async {
+    await controller.load();
+    await clickUp.load();
+    if (connectClickUp) await clickUp.connect(server.validToken);
+  }
 }
 
 RunningTimer runningTimer({

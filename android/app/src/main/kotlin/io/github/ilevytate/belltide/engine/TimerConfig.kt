@@ -7,6 +7,14 @@ data class StepConfig(
     val sound: String,
 )
 
+/** A ClickUp task a timer logs its running time to. */
+data class TaskLink(
+    val taskId: String,
+    /** The ClickUp workspace (API "team") the task belongs to. */
+    val teamId: String,
+    val name: String,
+)
+
 /**
  * Everything the engine needs to run a timer. The Flutter side builds this from a
  * saved preset and sends it over the platform channel as JSON.
@@ -24,6 +32,8 @@ data class TimerConfig(
     val leadInMs: Long,
     val startChime: Boolean,
     val finishSound: String,
+    /** When set, each stretch of running time is logged to this task. */
+    val task: TaskLink? = null,
 ) {
     init {
         require(steps.isNotEmpty()) { "A timer needs at least one step" }

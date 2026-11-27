@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import 'chime_sound.dart';
+import 'task_link.dart';
 
 /// How a timer is presented and edited. Both kinds run on the same engine:
 /// an interval timer is a sequence with a single step.
@@ -81,6 +82,7 @@ class TimerPreset {
     this.leadIn = Duration.zero,
     this.startChime = false,
     this.finishSound = ChimeSound.none,
+    this.task,
   });
 
   /// An interval chime: [sound] every [every], forever or for [chimes] chimes.
@@ -125,6 +127,9 @@ class TimerPreset {
   /// Plays when the last round ends. Unused when the timer repeats forever.
   final ChimeSound finishSound;
 
+  /// The ClickUp task this timer logs time to, if any.
+  final TaskLink? task;
+
   bool get isInterval => kind == TimerKind.interval;
   bool get repeatsForever => rounds == 0;
 
@@ -163,6 +168,8 @@ class TimerPreset {
     Duration? leadIn,
     bool? startChime,
     ChimeSound? finishSound,
+    TaskLink? task,
+    bool clearTask = false,
   }) {
     return TimerPreset(
       id: id ?? this.id,
@@ -173,6 +180,7 @@ class TimerPreset {
       leadIn: leadIn ?? this.leadIn,
       startChime: startChime ?? this.startChime,
       finishSound: finishSound ?? this.finishSound,
+      task: clearTask ? null : (task ?? this.task),
     );
   }
 
@@ -196,6 +204,7 @@ class TimerPreset {
       'startChime': startChime,
       // An interval timer ends on its own chime.
       'finishSound': interval ? intervalSound.id : finishSound.id,
+      if (task case final link?) 'task': {'id': link.taskId, 'teamId': link.teamId, 'name': link.name},
     };
   }
 
@@ -208,6 +217,7 @@ class TimerPreset {
     'leadInMs': leadIn.inMilliseconds,
     'startChime': startChime,
     'finishSound': finishSound.id,
+    if (task != null) 'task': task!.toJson(),
   };
 
   factory TimerPreset.fromJson(Map<String, Object?> json) {
@@ -224,6 +234,7 @@ class TimerPreset {
       leadIn: Duration(milliseconds: (json['leadInMs'] as num?)?.toInt() ?? 0),
       startChime: json['startChime'] as bool? ?? false,
       finishSound: ChimeSound.fromId(json['finishSound'], fallback: ChimeSound.none),
+      task: TaskLink.fromJson(json['task']),
     );
   }
 

@@ -68,6 +68,20 @@ Run each check with the screen off unless noted. For each, note the device, Andr
 9. **Notification permission denied** (Android 13+). Deny the permission on first start. The timer should still chime; only the notification is missing.
 10. **Audio routing.** With headphones connected, check the alarm and media volume settings: alarm should usually also play on the speaker, media only in the headphones. Check that both play with the ringer on silent.
 
+## ClickUp checks
+
+Use a test workspace or a task you don't mind adding time entries to.
+
+11. **Connect.** Settings › ClickUp, paste a personal token. A wrong token shows an error and isn't saved. With several workspaces, you're asked to choose one.
+12. **Search.** Open the task icon on the home screen. Check that subtasks appear with "Subtask of …", that typing a parent's name finds its subtasks, that "Assigned to me" and "Include closed" change the results, and that pasting a task link (and a custom id, if your workspace uses them) finds a task that isn't in the list.
+13. **Log time.** Start a timer for a task, let it run about a minute, pause it, resume, then stop it. The task in ClickUp should show two time entries named "*timer* (Belltide)" whose lengths match the running time.
+14. **Several tasks at once.** Start timers for two different tasks at the same time, stop both, and check each task got its own entry.
+15. **Offline.** Turn on airplane mode, run and stop a linked timer, then turn the network back on and open the app. Settings › ClickUp should show the entry waiting, then sent.
+16. **Screen off.** Run a finite linked sequence to the end with the screen off. Its time entry should appear in ClickUp without opening the app.
+17. **Renamed or deleted task.** Rename a linked task in ClickUp and reopen Belltide: the card shows the new name. Delete it: the card says "not found", and a time entry for it is dropped with an explanation in Settings › ClickUp.
+
+Upload attempts log to `adb logcat -s BelltideClickUp` when they fail.
+
 ## Inspecting state
 
 ```bash

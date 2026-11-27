@@ -25,6 +25,13 @@ object EngineJson {
             leadInMs = o.optLong("leadInMs", 0),
             startChime = o.optBoolean("startChime", false),
             finishSound = o.optString("finishSound", TimerConfig.SOUND_NONE),
+            task = o.optJSONObject("task")?.let { t ->
+                TaskLink(
+                    taskId = t.getString("id"),
+                    teamId = t.getString("teamId"),
+                    name = t.optString("name", ""),
+                )
+            },
         )
     }
 
@@ -46,6 +53,11 @@ object EngineJson {
         .put("leadInMs", c.leadInMs)
         .put("startChime", c.startChime)
         .put("finishSound", c.finishSound)
+        .also { o ->
+            c.task?.let { t ->
+                o.put("task", JSONObject().put("id", t.taskId).put("teamId", t.teamId).put("name", t.name))
+            }
+        }
 
     fun snapshotsToJson(snapshots: List<TimerSnapshot>, finished: List<String> = emptyList()): String {
         val timers = JSONArray()
@@ -81,7 +93,8 @@ object EngineJson {
                 JSONObject()
                     .put("config", configToJson(t.config))
                     .put("anchorMs", t.anchorMs)
-                    .put("pausedAtMs", t.pausedAtMs ?: JSONObject.NULL),
+                    .put("pausedAtMs", t.pausedAtMs ?: JSONObject.NULL)
+                    .put("segmentStartMs", t.segmentStartMs ?: JSONObject.NULL),
             )
         }
         return arr.toString()
@@ -96,6 +109,7 @@ object EngineJson {
                     config = parseConfig(o.getJSONObject("config")),
                     anchorMs = o.getLong("anchorMs"),
                     pausedAtMs = if (o.isNull("pausedAtMs")) null else o.getLong("pausedAtMs"),
+                    segmentStartMs = if (o.isNull("segmentStartMs")) null else o.getLong("segmentStartMs"),
                 )
             }.getOrNull()
         }

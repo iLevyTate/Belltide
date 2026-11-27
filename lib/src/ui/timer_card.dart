@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../model/timer_preset.dart';
 import '../state/belltide_scope.dart';
 import '../util/format.dart';
+import 'clickup/task_widgets.dart';
 import 'editor_screen.dart';
 import 'running_panel.dart';
 
@@ -53,6 +54,7 @@ class TimerCard extends StatelessWidget {
                           presetDetail(preset),
                           style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
                         ),
+                        if (preset.task case final link?) LinkedTaskRow(link: link),
                       ],
                     ),
                   ),
