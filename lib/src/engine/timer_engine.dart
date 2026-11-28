@@ -1,4 +1,5 @@
 import '../model/app_settings.dart';
+import '../model/audio_status.dart';
 import '../model/chime_sound.dart';
 import '../model/running_timer.dart';
 import '../model/timer_preset.dart';
@@ -21,6 +22,15 @@ abstract interface class TimerEngine {
 
   Future<void> previewSound(ChimeSound sound);
   Future<void> applySettings(AppSettings settings);
+
+  /// The phone volume chimes play at, and whether the ringer is silenced.
+  Future<AudioStatus> audioStatus();
+
+  /// Fires when a phone volume or the ringer mode changes while the app is on screen.
+  Stream<void> get audioChanges;
+
+  /// Shows the phone's volume sliders.
+  Future<void> openVolumeSettings();
 
   Future<bool> notificationsAllowed();
 

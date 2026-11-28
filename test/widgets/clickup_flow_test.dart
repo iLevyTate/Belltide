@@ -26,6 +26,7 @@ void main() {
     await tester.tap(find.byTooltip('Settings'));
     await settle(tester);
     await tester.scrollUntilVisible(find.text('ClickUp'), 200, scrollable: find.byType(Scrollable).first);
+    await tester.pump();
     await tester.tap(find.text('ClickUp'));
     await settle(tester);
     expect(find.text('Link timers to ClickUp tasks'), findsOneWidget);

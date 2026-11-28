@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../model/timer_preset.dart';
 import '../state/belltide_scope.dart';
 import '../state/clickup_scope.dart';
+import 'brand_mark.dart';
 import 'clickup/task_picker_screen.dart';
 import 'editor_screen.dart';
 import 'settings_screen.dart';
@@ -76,7 +77,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Belltide'),
+        title: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [BrandMark(), SizedBox(width: 12), Text('Belltide')],
+        ),
         actions: [
           if (clickUp.connected)
             IconButton(

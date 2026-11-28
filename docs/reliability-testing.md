@@ -66,19 +66,48 @@ Run each check with the screen off unless noted. For each, note the device, Andr
 7. **Notification controls.** From the lock screen, use Pause, Resume, Skip and Stop on the notification. With two timers running, use Pause all and Stop all.
 8. **Finish.** Run Finite to the end with the screen off. The finish sound plays, the notification disappears, and the switch in the app is off.
 9. **Notification permission denied** (Android 13+). Deny the permission on first start. The timer should still chime; only the notification is missing.
-10. **Audio routing.** With headphones connected, check the alarm and media volume settings: alarm should usually also play on the speaker, media only in the headphones. Check that both play with the ringer on silent.
+10. **Audio routing.** On the phone speaker, check the alarm and media volume settings: each follows its own phone volume. Connect headphones or a Bluetooth speaker: chimes play only through them, at the media volume, with either setting, and Settings shows "Phone media volume". Check that chimes play with the ringer on silent.
+
+## Sound checks
+
+Run these with the screen on first, then repeat 11 and 13 with the screen off. Keep a second log open for the player:
+
+```bash
+adb logcat -s BelltideChimePlayer
+```
+
+11. **Over other audio.** Play a video or music, then start Fast. The other audio keeps playing, dips for each chime and comes back. If the log says `Other audio was not lowered`, Android refused the request; note the focus result. Repeat with "Lower other audio during chimes" off: nothing dips and the chime is still audible. While a chime plays, this shows who holds audio focus:
+
+    ```bash
+    adb shell dumpsys audio | grep -A8 "Audio Focus stack"
+    ```
+
+    Belltide should appear with `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` during a chime and be gone a few seconds later.
+
+    Do this once on the phone speaker and once over Bluetooth. To see the levels Android applies, run this while a chime plays and find the two tracks (Belltide's uid and the player's):
+
+    ```bash
+    adb shell dumpsys media.audio_flinger | grep -B3 -A12 "Active tracks"
+    ```
+
+    The player's track should keep a finite `PortVol dB` and show a negative `VS dB` (the dip). `-inf` means the other audio was muted, not lowered. Belltide's track should be on the same output as the player's.
+12. **Volume controls.** In Settings, drag the chime volume slider: a bell plays at the new level when you let go, and at 0% ("Muted") nothing plays. Press the phone's volume buttons while Belltide is open: the alarm (or media) volume changes, not the ring volume, and the number in Settings follows. With headphones connected and "Alarm volume" chosen, the tile reads "Phone media volume" and the buttons change the media volume; unplug them and it goes back to the alarm volume. "Adjust" opens the phone's volume panel. With the phone volume at zero, Settings says chimes can't be heard.
+13. **Vibrate and silent.** Switch the ringer to vibrate, then to silent. Settings shows the mode, and chimes still play at the alarm or media volume. Turn on "Vibrate instead when silenced": chimes buzz and make no sound, and sound returns when the ringer is back on. With "Vibrate with each chime" on, the buzz arrives with the screen off. `adb shell dumpsys vibrator_manager` lists recent vibrations and why any were ignored.
+14. **Do Not Disturb.** With the default Do Not Disturb settings, alarms and media are allowed and chimes play. Note what happens in any mode that blocks alarms.
+15. **Sound picker.** Open a timer and tap its sound. Each of the 18 sounds plays when tapped, a new tap cuts off the one before, and nothing is saved until "Use …" is pressed. Listen for clicks, distortion at full volume, and sounds that seem much louder or quieter than the rest.
+16. **Calls.** During a phone call, a chime must not interrupt or lower the call audio.
 
 ## ClickUp checks
 
 Use a test workspace or a task you don't mind adding time entries to.
 
-11. **Connect.** Settings › ClickUp, paste a personal token. A wrong token shows an error and isn't saved. With several workspaces, you're asked to choose one.
-12. **Search.** Open the task icon on the home screen. Check that subtasks appear with "Subtask of …", that typing a parent's name finds its subtasks, that "Assigned to me" and "Include closed" change the results, and that pasting a task link (and a custom id, if your workspace uses them) finds a task that isn't in the list.
-13. **Log time.** Start a timer for a task, let it run about a minute, pause it, resume, then stop it. The task in ClickUp should show two time entries named "*timer* (Belltide)" whose lengths match the running time.
-14. **Several tasks at once.** Start timers for two different tasks at the same time, stop both, and check each task got its own entry.
-15. **Offline.** Turn on airplane mode, run and stop a linked timer, then turn the network back on and open the app. Settings › ClickUp should show the entry waiting, then sent.
-16. **Screen off.** Run a finite linked sequence to the end with the screen off. Its time entry should appear in ClickUp without opening the app.
-17. **Renamed or deleted task.** Rename a linked task in ClickUp and reopen Belltide: the card shows the new name. Delete it: the card says "not found", and a time entry for it is dropped with an explanation in Settings › ClickUp.
+17. **Connect.** Settings › ClickUp, paste a personal token. A wrong token shows an error and isn't saved. With several workspaces, you're asked to choose one.
+18. **Search.** Open the task icon on the home screen. Check that subtasks appear with "Subtask of …", that typing a parent's name finds its subtasks, that "Assigned to me" and "Include closed" change the results, and that pasting a task link (and a custom id, if your workspace uses them) finds a task that isn't in the list.
+19. **Log time.** Start a timer for a task, let it run about a minute, pause it, resume, then stop it. The task in ClickUp should show two time entries named "*timer* (Belltide)" whose lengths match the running time.
+20. **Several tasks at once.** Start timers for two different tasks at the same time, stop both, and check each task got its own entry.
+21. **Offline.** Turn on airplane mode, run and stop a linked timer, then turn the network back on and open the app. Settings › ClickUp should show the entry waiting, then sent.
+22. **Screen off.** Run a finite linked sequence to the end with the screen off. Its time entry should appear in ClickUp without opening the app.
+23. **Renamed or deleted task.** Rename a linked task in ClickUp and reopen Belltide: the card shows the new name. Delete it: the card says "not found", and a time entry for it is dropped with an explanation in Settings › ClickUp.
 
 Upload attempts log to `adb logcat -s BelltideClickUp` when they fail.
 

@@ -5,6 +5,7 @@ import 'package:belltide/src/data/key_value_store.dart';
 import 'package:belltide/src/data/repositories.dart';
 import 'package:belltide/src/engine/timer_engine.dart';
 import 'package:belltide/src/model/app_settings.dart';
+import 'package:belltide/src/model/audio_status.dart';
 import 'package:belltide/src/model/chime_sound.dart';
 import 'package:belltide/src/model/running_timer.dart';
 import 'package:belltide/src/model/timer_preset.dart';
@@ -33,6 +34,14 @@ class FakeEngine implements TimerEngine {
   bool notificationsGranted = false;
   bool grantOnRequest = true;
   bool batteryUnrestricted = false;
+  AudioStatus audio = const AudioStatus(volume: 4, maxVolume: 7, ringer: RingerMode.normal);
+  final StreamController<void> _audioChanges = StreamController<void>.broadcast();
+
+  /// Changes what the phone reports and tells listeners, like a volume button press.
+  void setAudio(AudioStatus status) {
+    audio = status;
+    _audioChanges.add(null);
+  }
 
   @override
   Stream<EngineState> get states => _states.stream;
@@ -65,6 +74,15 @@ class FakeEngine implements TimerEngine {
 
   @override
   Future<void> applySettings(AppSettings settings) async => appliedSettings = settings;
+
+  @override
+  Future<AudioStatus> audioStatus() async => audio;
+
+  @override
+  Stream<void> get audioChanges => _audioChanges.stream;
+
+  @override
+  Future<void> openVolumeSettings() async => calls.add('openVolumeSettings');
 
   @override
   Future<bool> notificationsAllowed() async => notificationsGranted;
