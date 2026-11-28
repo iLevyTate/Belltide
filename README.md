@@ -8,7 +8,7 @@ Belltide is a native Flutter app for anything that runs on a rhythm: recurring c
 
 Early development. Android first.
 
-The v1 feature set and the optional ClickUp integration are implemented and covered by unit and widget tests, and the app builds as a debug and release APK. It has not yet been tested on physical devices with the screen off, and the ClickUp integration has only been tested against a simulated API; that is roadmap step 3, and [docs/reliability-testing.md](docs/reliability-testing.md) describes how to run it.
+The v1 feature set and the optional ClickUp integration are implemented and covered by unit and widget tests, and the app builds as a debug and release APK. Screen-off timing has only had a short check: one phone, plugged in, a three-minute timer. The longer runs on battery and in Doze have not been done. The way chimes mix with other apps' audio has been measured on that phone (a Pixel 9 Pro XL on Android 17 with Bluetooth earbuds) for sound previews and for timer chimes with the screen on and off, but not on the phone speaker. The ClickUp integration has only been tested against a simulated API; that is roadmap step 3, and [docs/reliability-testing.md](docs/reliability-testing.md) describes how to run it.
 
 ## Features
 
@@ -18,7 +18,10 @@ The v1 feature set and the optional ClickUp integration are implemented and cove
 - **Custom sequences:** chain steps of any length, for example a 10 second hold followed by 30 seconds off, repeated for a set number of rounds. Optional "get ready" countdown and finish sound.
 - **Background reliability:** an Android foreground service with a persistent notification keeps chimes going while the screen is off. The notification shows a live countdown with pause, skip and stop controls.
 - **Presets:** save a sequence once and start it with one tap. Several timers can run at the same time.
-- **Per-step sounds:** a different chime for each step, so you know which phase starts without looking. Eight built-in sounds, plus silent steps.
+- **Per-step sounds:** a different chime for each step, so you know which phase starts without looking. Eighteen built-in sounds in five groups (bells, bowls and gongs, chimes, wood and mallets, tones), plus silent steps. The picker plays each sound as you tap it, so you can compare before choosing.
+- **Plays alongside other audio:** a chime mixes with music, a video or a podcast instead of stopping it, and can lower the other audio for a moment so it stays easy to hear.
+- **Volume you control:** a chime volume slider in Settings, on top of the phone's alarm or media volume. While Belltide is open, the phone's volume buttons adjust the volume chimes use. Through headphones or a Bluetooth speaker, chimes use the media volume so they mix with what you are listening to.
+- **Works on vibrate and silent:** chimes keep playing when the ringer is on vibrate or silent, or can buzz instead if you prefer.
 
 The app opens with three sample timers (a five-minute mindfulness bell, stretch holds, and a 50/10 work and rest cycle). Edit or delete them freely.
 
@@ -68,7 +71,18 @@ For timers linked to a ClickUp task, the service records each stretch of running
 
 Running timers are saved on every change. If Android kills the service, it restarts it, or the app restores it the next time it opens, and the timers continue on their original schedule. Timers do not survive a reboot.
 
-Chimes play through a `SoundPool` on either the alarm stream (the default, usually loud and not tied to media volume) or the media stream, chosen in Settings. Vibration with each chime is optional.
+### Sound
+
+Chimes play through a `SoundPool` on either the alarm volume (the default, usually loud and not tied to media volume) or the media volume, chosen in Settings.
+
+- **Headphones and Bluetooth.** While headphones or an external speaker carry the phone's audio, chimes always play as media, whichever volume is chosen. Android routes alarm audio to the phone speaker as well as the headphones and takes the level of both from the speaker's volume. Measured on a Pixel 9 Pro XL with Bluetooth earbuds, that played the chime at -61 dB and muted the video under it; as media, the chime played at the media volume and the video dipped by 14 dB. Settings shows which phone volume is in use, and the volume buttons follow it.
+
+- **Other audio keeps playing.** `SoundPool` never takes audio focus, so a chime mixes with whatever else is playing. With "Lower other audio during chimes" on (the default), Belltide asks for transient "may duck" audio focus for about the first 70% of the chime (at most three seconds) and then gives it back. Most players dip their volume; some, such as podcast apps, pause and resume instead. If Android refuses the request (during a phone call, for example) the chime plays over the other audio at full level.
+- **Two volume controls.** The chime volume slider in Settings scales chimes relative to everything else on the phone (the gain is the slider position squared, which sounds even to the ear). The phone's own alarm or media volume still applies on top. Settings shows that phone volume, opens the system volume panel, and the hardware volume buttons adjust it while the app is on screen.
+- **Vibrate and silent.** Alarm and media audio are not muted by the ringer switch, so chimes play in vibrate and silent mode. "Vibrate instead when silenced" turns that around: while the ringer is on vibrate or silent, chimes buzz and make no sound. Vibration always uses the alarm vibration usage, which Android delivers with the screen off and the ringer silenced.
+- **Do Not Disturb.** Alarms and media are allowed through Do Not Disturb by default, but a schedule or mode that blocks them (or "total silence") will mute chimes too.
+
+Sounds are loaded when a timer starts, so its chimes are already decoded when they are due.
 
 ### Android details
 
@@ -127,13 +141,15 @@ Use `flutter build apk --release` for a file you can install directly. Bump `ver
 
 ### Chime sounds
 
-The sounds are synthesized by `tool/generate_chimes.py` (additive synthesis, no third-party audio) and committed as Ogg files in `android/app/src/main/res/raw/`. To change one, edit the script and regenerate:
+The sounds are synthesized by `tool/generate_chimes.py` (modal synthesis with a synthetic room reverb, no third-party audio) and committed as stereo 32 kHz Ogg files in `android/app/src/main/res/raw/`. Every sound is matched to the same loudness, so switching sounds doesn't change how loud a chime is. To change one, edit the script and regenerate from the repository root:
 
 ```bash
 python3 tool/generate_chimes.py
 ```
 
-It needs `numpy`, and `ffmpeg` for Ogg output. Sound ids must stay in sync between `ChimePlayer.kt` and `lib/src/model/chime_sound.dart`.
+It needs `numpy`, and `ffmpeg` for Ogg output. The script also writes `service/ChimeCatalog.kt` (resource ids and lengths), so the Kotlin side can't drift from the files. The Dart list in `lib/src/model/chime_sound.dart` is kept by hand; `test/model_test.dart` fails if its ids and the files differ. Ids are saved in presets, so don't rename one that has shipped.
+
+`SoundPool` decodes each sound into a buffer of about 1 MB, which is why the files are 32 kHz and at most 7.5 seconds long; the script refuses to write anything bigger.
 
 ### Project layout
 
@@ -149,7 +165,7 @@ lib/
 android/app/src/main/kotlin/io/github/ilevytate/belltide/
   MainActivity.kt               Platform channels, permission requests
   engine/                       Pure timing logic (Timeline, TimerEngine) and JSON
-  service/                      TimerService, notification, SoundPool player, persistence
+  service/                      TimerService, notification, SoundPool player and mix rules, persistence
   clickup/                      Encrypted token, time-entry queue and uploader
 android/app/src/test/           JVM unit tests for the engine
 test/                           Dart unit and widget tests, shared fixtures

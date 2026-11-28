@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:belltide/src/model/app_settings.dart';
+import 'package:belltide/src/model/audio_status.dart';
 import 'package:belltide/src/model/chime_sound.dart';
 import 'package:belltide/src/model/running_timer.dart';
 import 'package:belltide/src/model/task_link.dart';
@@ -33,6 +34,33 @@ void main() {
     test('audible list excludes silence', () {
       expect(ChimeSound.audible, isNot(contains(ChimeSound.none)));
       expect(ChimeSound.audible, hasLength(ChimeSound.values.length - 1));
+    });
+
+    test('every audible sound has a file, and every file has a sound', () {
+      final files = Directory('android/app/src/main/res/raw')
+          .listSync()
+          .map((f) => f.uri.pathSegments.last)
+          .where((name) => name.startsWith('chime_') && name.endsWith('.ogg'))
+          .map((name) => name.substring('chime_'.length, name.length - '.ogg'.length))
+          .toSet();
+      expect(ChimeSound.audible.map((s) => s.id).toSet(), files);
+    });
+
+    test('every audible sound is in exactly one picker group', () {
+      final grouped = [for (final group in ChimeGroup.values) ...ChimeSound.inGroup(group)];
+      expect(grouped, ChimeSound.audible);
+      expect(ChimeSound.none.group, isNull);
+      for (final group in ChimeGroup.values) {
+        expect(ChimeSound.inGroup(group), isNotEmpty, reason: group.label);
+      }
+    });
+
+    test('ids and labels are unique, and ids from v0.1 still resolve', () {
+      expect(ChimeSound.values.map((s) => s.id).toSet(), hasLength(ChimeSound.values.length));
+      expect(ChimeSound.values.map((s) => s.label).toSet(), hasLength(ChimeSound.values.length));
+      for (final id in ['bell', 'double', 'rise', 'bowl', 'gong', 'chime', 'wood', 'beep', 'none']) {
+        expect(ChimeSound.fromId(id).id, id);
+      }
     });
   });
 
@@ -172,9 +200,48 @@ void main() {
   });
 
   test('AppSettings round-trips and defaults to the alarm stream', () {
-    const settings = AppSettings(volume: ChimeVolume.media, vibrate: true);
+    const settings = AppSettings(
+      volume: ChimeVolume.media,
+      vibrate: true,
+      level: 0.35,
+      duckOthers: false,
+      vibrateWhenSilenced: true,
+    );
     expect(AppSettings.fromJson(settings.toJson()), settings);
     expect(AppSettings.fromJson(const {}), const AppSettings());
     expect(const AppSettings().volume, ChimeVolume.alarm);
+  });
+
+  test('AppSettings saved by v0.1 load at full volume with ducking on', () {
+    final old = AppSettings.fromJson(const {'volume': 'media', 'vibrate': true});
+    expect(old, const AppSettings(volume: ChimeVolume.media, vibrate: true));
+    expect(old.level, 1.0);
+    expect(old.duckOthers, isTrue);
+    expect(old.vibrateWhenSilenced, isFalse);
+  });
+
+  test('AppSettings keeps a stored level between silent and full', () {
+    expect(AppSettings.fromJson(const {'level': 7}).level, 1.0);
+    expect(AppSettings.fromJson(const {'level': -1}).level, 0.0);
+    expect(AppSettings.fromJson(const {'level': 'loud'}).level, 1.0);
+  });
+
+  test('AudioStatus reads what Android reports', () {
+    final status = AudioStatus.fromJson(const {'volume': 0, 'maxVolume': 15, 'ringer': 'silent'});
+    expect(status.muted, isTrue);
+    expect(status.silenced, isTrue);
+    expect(status.headphones, isFalse);
+    expect(AudioStatus.fromJson(const {}).ringer, RingerMode.normal);
+  });
+
+  test('chimes follow the media volume while headphones are connected', () {
+    final speaker = AudioStatus.fromJson(const {'volume': 3, 'maxVolume': 7});
+    expect(speaker.volumeFor(ChimeVolume.alarm), ChimeVolume.alarm);
+    expect(speaker.volumeFor(ChimeVolume.media), ChimeVolume.media);
+
+    final headphones = AudioStatus.fromJson(const {'volume': 12, 'maxVolume': 25, 'headphones': true});
+    expect(headphones.headphones, isTrue);
+    expect(headphones.volumeFor(ChimeVolume.alarm), ChimeVolume.media);
+    expect(headphones.volumeFor(ChimeVolume.media), ChimeVolume.media);
   });
 }

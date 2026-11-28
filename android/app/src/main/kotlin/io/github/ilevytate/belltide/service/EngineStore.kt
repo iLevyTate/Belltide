@@ -9,9 +9,18 @@ import io.github.ilevytate.belltide.engine.RunningTimer
 
 /** Audio and haptic settings the service applies to every chime. */
 data class EngineSettings(
-    /** "alarm" plays on the alarm volume (and the speaker); "media" follows media volume. */
+    /**
+     * "alarm" follows the alarm volume on the phone speaker and the media volume
+     * through headphones; "media" always follows the media volume.
+     */
     val audioStream: String = STREAM_ALARM,
     val vibrate: Boolean = false,
+    /** In-app chime volume from 0 to 1, applied on top of the stream's own volume. */
+    val level: Float = 1f,
+    /** Briefly lower other apps' audio while a chime plays. */
+    val duckOthers: Boolean = true,
+    /** On vibrate or silent, buzz instead of playing the sound. */
+    val vibrateWhenSilenced: Boolean = false,
 ) {
     companion object {
         const val STREAM_ALARM = "alarm"
@@ -62,11 +71,17 @@ class EngineStore(context: Context) {
             audioStream = prefs.getString(KEY_STREAM, EngineSettings.STREAM_ALARM)
                 ?: EngineSettings.STREAM_ALARM,
             vibrate = prefs.getBoolean(KEY_VIBRATE, false),
+            level = prefs.getFloat(KEY_LEVEL, 1f),
+            duckOthers = prefs.getBoolean(KEY_DUCK, true),
+            vibrateWhenSilenced = prefs.getBoolean(KEY_VIBRATE_WHEN_SILENCED, false),
         )
         set(value) {
             prefs.edit {
                 putString(KEY_STREAM, value.audioStream)
                 putBoolean(KEY_VIBRATE, value.vibrate)
+                putFloat(KEY_LEVEL, value.level)
+                putBoolean(KEY_DUCK, value.duckOthers)
+                putBoolean(KEY_VIBRATE_WHEN_SILENCED, value.vibrateWhenSilenced)
             }
         }
 
@@ -80,5 +95,8 @@ class EngineStore(context: Context) {
         const val KEY_SAVED_AT = "saved_at_elapsed"
         const val KEY_STREAM = "audio_stream"
         const val KEY_VIBRATE = "vibrate"
+        const val KEY_LEVEL = "chime_level"
+        const val KEY_DUCK = "duck_others"
+        const val KEY_VIBRATE_WHEN_SILENCED = "vibrate_when_silenced"
     }
 }

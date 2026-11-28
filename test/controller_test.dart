@@ -155,7 +155,7 @@ void main() {
   test('settings are saved and pushed to the engine', () async {
     final h = Harness();
     await h.controller.load();
-    const next = AppSettings(volume: ChimeVolume.media, vibrate: true);
+    const next = AppSettings(volume: ChimeVolume.media, vibrate: true, level: 0.5, duckOthers: false);
     await h.controller.updateSettings(next);
     expect(h.engine.appliedSettings, next);
     expect(await SettingsRepository(h.store).load(), next);

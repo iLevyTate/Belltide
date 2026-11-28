@@ -131,6 +131,8 @@ class TimerService : Service() {
             .map { it.sound }
             .distinct()
             .forEach(player::playChime)
+        // Decode what the running timers will play next, so those chimes start on time.
+        player.prepare(engine.all.flatMap { t -> t.config.steps.map { it.sound } + t.config.finishSound })
         logSegments(effects)
 
         if (persist || effects.any { it is EngineEffect.SegmentEnded }) store.saveTimers(engine.all)

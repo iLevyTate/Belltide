@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
 
 import '../model/app_settings.dart';
+import '../model/audio_status.dart';
 import '../model/chime_sound.dart';
 import '../model/running_timer.dart';
 import '../model/timer_preset.dart';
@@ -11,12 +13,18 @@ import 'timer_engine.dart';
 
 /// Talks to the Android timer service through MainActivity.kt.
 class PlatformTimerEngine implements TimerEngine {
-  PlatformTimerEngine({MonotonicClock? clock}) : _clock = clock ?? MonotonicClock();
+  PlatformTimerEngine({MonotonicClock? clock}) : _clock = clock ?? MonotonicClock() {
+    // The only call Android makes to Dart: a volume or the ringer mode changed.
+    _methods.setMethodCallHandler((call) async {
+      if (call.method == 'audioChanged') _audioChanges.add(null);
+    });
+  }
 
   static const MethodChannel _methods = MethodChannel('belltide/engine');
   static const EventChannel _events = EventChannel('belltide/engine/state');
 
   final MonotonicClock _clock;
+  final StreamController<void> _audioChanges = StreamController<void>.broadcast();
 
   @override
   late final Stream<EngineState> states = _events
@@ -52,7 +60,21 @@ class PlatformTimerEngine implements TimerEngine {
   Future<void> applySettings(AppSettings settings) => _methods.invokeMethod('applySettings', {
     'audioStream': settings.volume.name,
     'vibrate': settings.vibrate,
+    'level': settings.level,
+    'duckOthers': settings.duckOthers,
+    'vibrateWhenSilenced': settings.vibrateWhenSilenced,
   });
+
+  @override
+  Future<AudioStatus> audioStatus() async => AudioStatus.fromJson(
+    await _methods.invokeMapMethod<Object?, Object?>('audioStatus') ?? const {},
+  );
+
+  @override
+  Stream<void> get audioChanges => _audioChanges.stream;
+
+  @override
+  Future<void> openVolumeSettings() => _methods.invokeMethod('openVolumeSettings');
 
   @override
   Future<bool> notificationsAllowed() async =>

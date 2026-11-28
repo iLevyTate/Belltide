@@ -2,88 +2,185 @@ package io.github.ilevytate.belltide.service
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.SoundPool
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import io.github.ilevytate.belltide.R
+import android.util.Log
 
 /**
  * Plays chimes with a SoundPool, which keeps the short sounds decoded in memory so they
  * start with low latency. One instance per process, used from the main thread only.
+ *
+ * SoundPool never takes audio focus, so a chime mixes with whatever else is playing
+ * (music, a video) instead of stopping it. To stay audible over that, the player can
+ * ask other apps to lower their volume for the length of the chime ("ducking").
+ *
+ * A chime follows the alarm or the media volume, as the user chose, except through
+ * headphones or an external speaker, where it always plays as media
+ * (see [ChimeMix.streamFor]).
  */
 class ChimePlayer private constructor(context: Context) {
     private val appContext = context.applicationContext
     private val store = EngineStore(appContext)
+    private val audio = appContext.getSystemService(AudioManager::class.java)
+    private val handler = Handler(Looper.getMainLooper())
+
     private var pool: SoundPool? = null
     private var poolStream: String? = null
     private val soundIds = mutableMapOf<String, Int>()
     private val loaded = mutableSetOf<Int>()
-    private val pending = mutableSetOf<Int>()
 
-    /** Plays [sound] for a timer, with vibration if the user turned it on. */
+    /** Sounds asked for before they finished loading, with the play they are owed. */
+    private val pending = mutableMapOf<Int, PendingPlay>()
+
+    /** The stream of the sound the user is trying out, so the next one can replace it. */
+    private var previewStream = 0
+
+    private var focusRequest: AudioFocusRequest? = null
+    private var focusUntil = 0L
+    private val abandonFocus = Runnable { releaseFocus() }
+
+    /** Plays [sound] for a timer, with vibration if the settings ask for it. */
     fun playChime(sound: String) {
         val settings = store.settings
-        play(sound, settings.audioStream)
-        if (settings.vibrate) vibrate(settings.audioStream)
+        val output = ChimeMix.forChime(settings, ringerSilenced())
+        play(sound, streamNow(audio, settings), output, preview = false)
+        if (output.vibrate) vibrate()
     }
 
     /** Plays [sound] once so the user can hear it while choosing. */
     fun preview(sound: String) {
-        play(sound, store.settings.audioStream)
+        val settings = store.settings
+        play(sound, streamNow(audio, settings), ChimeMix.forPreview(settings), preview = true)
     }
 
-    /** Rebuilds the sound pool if the audio stream setting changed. */
+    /** Loads [sounds] ahead of time so a timer's chimes start without a delay. */
+    fun prepare(sounds: Collection<String>) {
+        if (sounds.none { it in CHIME_CATALOG }) return
+        val p = ensurePool(streamNow(audio, store.settings))
+        sounds.forEach { soundId(p, it) }
+    }
+
+    /** Applies changed settings: a new stream needs a new pool, and ducking can be turned off. */
     fun onSettingsChanged() {
-        if (poolStream != null && poolStream != store.settings.audioStream) release()
+        val settings = store.settings
+        if (poolStream != null && poolStream != streamNow(audio, settings)) release()
+        if (!settings.duckOthers) releaseFocus()
     }
 
     fun release() {
+        releaseFocus()
         pool?.release()
         pool = null
         poolStream = null
         soundIds.clear()
         loaded.clear()
         pending.clear()
+        previewStream = 0
     }
 
-    private fun play(sound: String, stream: String) {
+    private fun play(sound: String, stream: String, output: ChimeOutput, preview: Boolean) {
+        val info = CHIME_CATALOG[sound] ?: return
+        if (output.gain <= 0f) return
         val p = ensurePool(stream)
-        val id = soundIds[sound] ?: return
-        if (id in loaded) {
-            p.play(id, 1f, 1f, 1, 0, 1f)
-        } else {
-            // Sounds load asynchronously; a chime requested in the first moments
-            // after the pool is created plays as soon as it is ready.
-            pending += id
+        val id = soundId(p, sound) ?: return
+        if (preview) {
+            // The sound being tried out replaces the one before it.
+            if (previewStream != 0) p.stop(previewStream)
+            pending.values.removeAll { it.preview }
         }
+        if (output.duck && streamAudible(stream)) holdFocus(stream, ChimeMix.duckMs(info.durationMs))
+        if (id in loaded) {
+            start(p, id, output.gain, preview)
+        } else {
+            // Sounds load asynchronously; one requested before it is ready plays
+            // as soon as it is.
+            pending[id] = PendingPlay(output.gain, preview)
+        }
+    }
+
+    private fun start(p: SoundPool, id: Int, gain: Float, preview: Boolean) {
+        val streamId = p.play(id, gain, gain, 1, 0, 1f)
+        if (preview) previewStream = streamId
+    }
+
+    private fun soundId(p: SoundPool, sound: String): Int? {
+        val info = CHIME_CATALOG[sound] ?: return null
+        return soundIds.getOrPut(sound) { p.load(appContext, info.resId, 1) }
     }
 
     private fun ensurePool(stream: String): SoundPool {
         pool?.let { if (poolStream == stream) return it }
         release()
-        val attributes = AudioAttributes.Builder()
-            .setUsage(
-                if (stream == EngineSettings.STREAM_MEDIA) AudioAttributes.USAGE_MEDIA
-                else AudioAttributes.USAGE_ALARM,
-            )
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        val p = SoundPool.Builder()
+            .setMaxStreams(MAX_STREAMS)
+            .setAudioAttributes(attributesFor(stream))
             .build()
-        val p = SoundPool.Builder().setMaxStreams(6).setAudioAttributes(attributes).build()
         p.setOnLoadCompleteListener { sp, sampleId, status ->
-            if (status != 0) return@setOnLoadCompleteListener
+            // SoundPool calls back on the thread that built it: the main thread.
+            if (sp !== pool) return@setOnLoadCompleteListener
+            if (status != 0) {
+                Log.w(TAG, "Could not load sound $sampleId (status $status)")
+                pending.remove(sampleId)
+                return@setOnLoadCompleteListener
+            }
             loaded += sampleId
-            if (pending.remove(sampleId)) sp.play(sampleId, 1f, 1f, 1, 0, 1f)
+            pending.remove(sampleId)?.let { start(sp, sampleId, it.gain, it.preview) }
         }
-        for ((name, res) in SOUNDS) soundIds[name] = p.load(appContext, res, 1)
         pool = p
         poolStream = stream
         return p
     }
 
-    private fun vibrate(stream: String) {
+    /**
+     * Asks other apps to lower their audio for [durationMs]. Chimes that overlap share
+     * one request, which is given back when the last of them is over. If Android
+     * refuses (during a call, for example) the chime simply plays over the other audio.
+     */
+    private fun holdFocus(stream: String, durationMs: Long) {
+        if (focusRequest == null) {
+            val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                .setAudioAttributes(attributesFor(stream))
+                .build()
+            val granted = runCatching { audio.requestAudioFocus(request) }
+                .getOrDefault(AudioManager.AUDIOFOCUS_REQUEST_FAILED)
+            if (granted != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                Log.d(TAG, "Other audio was not lowered (focus result $granted)")
+                return
+            }
+            focusRequest = request
+            focusUntil = 0L
+        }
+        val until = SystemClock.uptimeMillis() + durationMs
+        if (until > focusUntil) {
+            focusUntil = until
+            handler.removeCallbacks(abandonFocus)
+            handler.postAtTime(abandonFocus, until)
+        }
+    }
+
+    private fun releaseFocus() {
+        handler.removeCallbacks(abandonFocus)
+        focusRequest?.let { runCatching { audio.abandonAudioFocusRequest(it) } }
+        focusRequest = null
+        focusUntil = 0L
+    }
+
+    /** False when the chime's own volume is at zero: no reason to quieten anything else. */
+    private fun streamAudible(stream: String): Boolean = audio.getStreamVolume(streamType(stream)) > 0
+
+    /** True when the phone is on vibrate or silent. */
+    private fun ringerSilenced(): Boolean = audio.ringerMode != AudioManager.RINGER_MODE_NORMAL
+
+    private fun vibrate() {
         val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             appContext.getSystemService(VibratorManager::class.java)?.defaultVibrator
         } else {
@@ -92,29 +189,57 @@ class ChimePlayer private constructor(context: Context) {
         } ?: return
         if (!vibrator.hasVibrator()) return
         val effect = VibrationEffect.createWaveform(longArrayOf(0, 180, 120, 180), -1)
-        val alarm = stream != EngineSettings.STREAM_MEDIA
+        // Always an alarm vibration, whichever volume the sound uses: Android drops
+        // media vibrations from an app that is not on screen, and a chime has to
+        // buzz with the screen off.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val usage = if (alarm) VibrationAttributes.USAGE_ALARM else VibrationAttributes.USAGE_MEDIA
-            vibrator.vibrate(effect, VibrationAttributes.createForUsage(usage))
+            vibrator.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM))
         } else {
-            val usage = if (alarm) AudioAttributes.USAGE_ALARM else AudioAttributes.USAGE_MEDIA
             @Suppress("DEPRECATION")
-            vibrator.vibrate(effect, AudioAttributes.Builder().setUsage(usage).build())
+            vibrator.vibrate(
+                effect,
+                AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build(),
+            )
         }
     }
 
+    private class PendingPlay(val gain: Float, val preview: Boolean)
+
     companion object {
-        /** Sound ids shared with the Flutter side (lib/src/model/chime_sound.dart). */
-        val SOUNDS: Map<String, Int> = mapOf(
-            "bell" to R.raw.chime_bell,
-            "bowl" to R.raw.chime_bowl,
-            "chime" to R.raw.chime_chime,
-            "double" to R.raw.chime_double,
-            "wood" to R.raw.chime_wood,
-            "gong" to R.raw.chime_gong,
-            "rise" to R.raw.chime_rise,
-            "beep" to R.raw.chime_beep,
-        )
+        private const val TAG = "BelltideChimePlayer"
+        private const val MAX_STREAMS = 6
+
+        /** The AudioManager stream whose volume a chime follows. */
+        fun streamType(stream: String): Int =
+            if (stream == EngineSettings.STREAM_MEDIA) AudioManager.STREAM_MUSIC
+            else AudioManager.STREAM_ALARM
+
+        /** The volume a chime would play on right now: [EngineSettings.audioStream] or media. */
+        fun streamNow(audio: AudioManager, settings: EngineSettings): String =
+            ChimeMix.streamFor(settings.audioStream, externalOutput(audio))
+
+        /** True while headphones or an external speaker carry the phone's media audio. */
+        fun externalOutput(audio: AudioManager): Boolean = runCatching {
+            val outputs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                // Where media is going now, which is not always the last thing plugged in.
+                audio.getAudioDevicesForAttributes(attributesFor(EngineSettings.STREAM_MEDIA))
+            } else {
+                audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).asList()
+            }
+            ChimeMix.isExternal(outputs.map { it.type })
+        }.getOrDefault(false)
+
+        /**
+         * Alarm and media audio both keep playing when the phone is on vibrate or
+         * silent; only the ring and notification volumes are muted by the ringer.
+         */
+        private fun attributesFor(stream: String): AudioAttributes = AudioAttributes.Builder()
+            .setUsage(
+                if (stream == EngineSettings.STREAM_MEDIA) AudioAttributes.USAGE_MEDIA
+                else AudioAttributes.USAGE_ALARM,
+            )
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
 
         @Volatile
         private var instance: ChimePlayer? = null
